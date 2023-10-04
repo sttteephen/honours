@@ -50,10 +50,8 @@ class CustomRewardWrapper(gym.Wrapper):
 
         if not self.bug_flags[0] and check_bug(*BUG1):
             self.bug_flags[0] = True
-            reward += 50
         if not self.bug_flags[1] and check_bug(*BUG2):
             self.bug_flags[1] = True
-            reward += 50
 
         if terminated or truncated:
             self.ep_count += 1
@@ -68,91 +66,54 @@ class CustomRewardWrapper(gym.Wrapper):
 
         return observation, reward, terminated, truncated, info
 
-
-## TRAINING ##
-
+## TRAINING FROM SCRATCH OF LOAD MODEL ##
 def train():
     env = gym.make('MsPacman-v4')
-    env = CustomRewardWrapper(env)
 
-    model = DQN('CnnPolicy', env, buffer_size=10000, verbose=1)
+    #model = DQN('CnnPolicy', env, buffer_size=10000, verbose=1)
 
-    #model = DQN.load('latest_mspacman')
-    #model.set_env(env)
+    model = DQN.load('latest_mspacman_baseline')
+    model.set_env(env)
 
-    model.learn(total_timesteps=500000, tensorboard_log="./tensor_RELNIE/")
-    model.save('latest_mspacman_RELINE')
+    model.learn(total_timesteps=500000, tensorboard_log="./tensor_baseline/")
+    model.save('latest_mspacman_baseline')
 
 
 ## EVALUATION ##
-
 def evaluate():
-    model = DQN.load('latest_mspacman_RELINE')
+    model = DQN.load('latest_mspacman_baseline')
     env = gym.make('MsPacman-v4')
-    env = CustomRewardWrapper(env)
+    env = CustomRewardWrapper(env) # wrapped so it counts the bugs
 
     mean_reward, std_reward = evaluate_policy(
         model,
         env,
-        n_eval_episodes=10,
+        n_eval_episodes=100,
         deterministic=True,
     )
 
     print(f'episodes={env.ep_count}, one_bug={env.one_bug}, two_bugs={env.two_bug}')
 
 
-## TESTING CODE ##
-env = gym.make('MsPacman-v4', render_mode='human')
-env = CustomRewardWrapper(env)
+## TESTING CODE HUMAN RENDER ##
+def test():
+    env = gym.make('MsPacman-v4', render_mode='human')
+    model = DQN.load('latest_mspacman_baseline')
+    model.set_env(env)
 
-model = DQN.load('latest_mspacman')
+    for game in range(10):
+        state = env.reset()
 
-for game in range(10):
-    print('new game')
-    state = env.reset()
+        # do nothing for 65 timesteps at start of the game
+        for i in range(65):
+            state, reward, terminated, truncated, info = env.step(0)
 
-    for i in range(65):
-        state, reward, terminated, truncated, info = env.step(0)
+        while True:
 
-    while True:
+            action, _states = model.predict(state, deterministic=True)
+            state, reward, terminated, truncated, info = env.step(action)
+            
+            if terminated or truncated:
+                break
 
-        action, _states = model.predict(state, deterministic=True)
-        print('action', action)
-        # random action
-        state, reward, terminated, truncated, info = env.step(action)
-        print(reward)
-        
-        # check injected bugs
-        env.env.ale.saveScreenPNG('current_screen.png')
-        check_bug1()
-        
-        if terminated or truncated:
-            break
-
-## TESTING CODE ##
-env = gym.make('MsPacman-v4', render_mode='human')
-env = CustomRewardWrapper(env)
-
-model = DQN.load('latest_mspacman')
-
-for game in range(10):
-    print('new game')
-    state = env.reset()
-
-    for i in range(65):
-        state, reward, terminated, truncated, info = env.step(0)
-
-    while True:
-
-        action, _states = model.predict(state, deterministic=True)
-        print('action', action)
-        # random action
-        state, reward, terminated, truncated, info = env.step(action)
-        print(reward)
-        
-        # check injected bugs
-        env.env.ale.saveScreenPNG('current_screen.png')
-        check_bug1()
-        
-        if terminated or truncated:
-            break
+evaluate()

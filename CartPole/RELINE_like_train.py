@@ -5,35 +5,39 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
 
+import csv
 
-episode_count = 0
-bug_one_count = 0
-bug_two_count = 0
-found_both = 0
 
-class RewardLagWrapper(gym.Wrapper):
+class CustomRewardWrapper(gym.Wrapper):
     def __init__(self, env):
-        super(RewardLagWrapper, self).__init__(env)
-        self.found_reward_one = False
-        self.found_reward_two = False
+        super(CustomRewardWrapper, self).__init__(env)
+
+        # flags bugs found during one episode
+        self.found_bug_one = False
+        self.found_bug_two = False
+
+        # tracks progress across episodes
+        self.episode_count = 0
+        self.bug_one_count = 0
+        self.bug_two_count = 0
+        self.found_both = 0
         
-        self.explore_list = [False] * 5
+        #self.explore_list = [False] * 5
 
     def step(self, action):
-        global episode_count, found_both
 
         observation, reward, terminated, truncated, info = self.env.step(action)
 
         if terminated or truncated:
             
-            episode_count += 1
-            if self.found_reward_one and self.found_reward_two:
-                found_both += 1
+            self.episode_count += 1
+            if self.found_bug_one and self.found_bug_two:
+                self.found_both += 1
 
-            self.found_reward_one = False
-            self.found_reward_two = False
+            self.found_bug_one = False
+            self.found_bug_two = False
 
-            self.explore_list = [False] * 5
+            #self.explore_list = [False] * 5
         
         modified_reward = self.custom_reward_function(observation, reward)
         return observation, modified_reward, terminated, truncated, info
@@ -42,22 +46,20 @@ class RewardLagWrapper(gym.Wrapper):
     def custom_reward_function(self, observation, reward):
 
         # check if cart is in first bug area and not already found
-        if observation[0] > 1 and observation[0] < 1.5 and self.found_reward_one == False:
-            global bug_one_count
-            bug_one_count += 1
+        if not self.found_bug_one and observation[0] > 0.45 and observation[0] < 0.5:
+            self.bug_one_count += 1
 
             #print('found bug one')
-            reward += 100
-            self.found_reward_one = True
+            reward += 50
+            self.found_bug_one = True
 
         # check if cart is in first bug area and not already found
-        if observation[0] > -1.5 and observation[0] < -1 and self.found_reward_two == False:
-            global bug_two_count
-            bug_two_count += 1
+        if not self.found_bug_two and observation[0] > -0.5 and observation[0] < -0.45:
+            self.bug_two_count += 1
 
             #print('found bug two')
-            reward += 100
-            self.found_reward_two = True
+            reward += 50
+            self.found_bug_two = True
 
         #testing curiosity
         #reward = self.curiosity_reward_function(observation, reward)
@@ -89,39 +91,40 @@ class RewardLagWrapper(gym.Wrapper):
 
         return reward
 
-# make wrapped env then train PPO
-env = gym.make('CartPole-v1')
-env = RewardLagWrapper(env)
+for i in range(10):
+    
+    ## TRAINING ###
+    env = gym.make('CartPole-v1')
+    env = CustomRewardWrapper(env)
 
-model = PPO('MlpPolicy', env, verbose=1)
-model.learn(total_timesteps=100000)
+    training_timesteps = 100000
+    model = PPO('MlpPolicy', env, verbose=1)
+    model.learn(total_timesteps=training_timesteps)
 
+    env.close()
 
-## EVALUATION ##
+    ## EVALUATION ##
 
-episode_count = 0
-bug_one_count = 0
-bug_two_count = 0
-found_both = 0
+    eval_env = gym.make('CartPole-v1')
+    eval_env = CustomRewardWrapper(env)
 
-eval_env = gym.make('CartPole-v1')
-eval_env = RewardLagWrapper(env)
+    mean_reward, std_reward = evaluate_policy(
+        model,
+        eval_env,
+        n_eval_episodes=100,
+        deterministic=True,
+    )
 
-mean_reward, std_reward = evaluate_policy(
-    model,
-    eval_env,
-    n_eval_episodes=500,
-    deterministic=True,
-)
+    # ouput stats
+    print(f'train_timesteps={training_timesteps}, eval_episodes={eval_env.episode_count}, bug_one_count={eval_env.bug_one_count}, bug_two_count={eval_env.bug_two_count}, found_both_count={eval_env.found_both}')
+    print(f"mean_reward={mean_reward:.2f} +/- {std_reward}")
 
-# ouput stats
-print(f'episodes={episode_count}, bug_one_count={bug_one_count}, bug_two_count={bug_two_count}')
-print(f"mean_reward={mean_reward:.2f} +/- {std_reward}")
-input()
+    with open('CartPoleRELINEResults.csv', 'a', newline='\n') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([eval_env.episode_count, eval_env.bug_one_count, eval_env.bug_two_count, eval_env.found_both])
 
-
-
-
+    eval_env.close()
+    
 
 # just plays with rendered screen
 #vec_env = make_vec_env('CartPole-v1', n_envs=4)
